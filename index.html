@@ -127,6 +127,7 @@ tr.total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:none}
 .week-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);align-items:center}
 .week-legend .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 table.days tr.model td:first-child::before{content:none}
+table.mt{min-width:520px}table.mt tr.total td{font-weight:700}table.mt tr:not(.model) td:first-child::before{content:none}
 .lock{min-height:100vh;display:grid;place-items:center;padding-block:24px}
 .lockcard{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:380px}
 .lockcard input[type=password]{padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);min-height:42px}
@@ -187,7 +188,7 @@ const ENT={WH:"ИП Warm Hearts",FX:"ООО Феникс"};
 const NEW=["KY6612","KY6613","KY6614","KY6615","KY6616"];
 const st={reports:{},dates:[],date:null,ent:"WH",open:new Set(),loaded:false};
 try{const e=localStorage.getItem("ozon-ent");if(e&&["WH","FX","ALL","SALES","MONTH"].includes(e))st.ent=e}catch(e){}
-st.period="all";st.metric="rev";st.month=null;st.mEnt="ALL";
+st.period="all";st.metric="rev";st.month=null;st.mEnt="ALL";st.months={};st.mopen=new Set();
 
 const fmt=n=>n==null||!isFinite(n)?"—":Math.round(n).toLocaleString("ru-RU");
 const pct=(n,d=1)=>n==null||!isFinite(n)?"—":(n*100).toLocaleString("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d})+"%";
@@ -238,7 +239,7 @@ function render(){
   if(!st.loaded){$("dayTitle").textContent="Загружаю отчёты…";main.append(emptyBox("Загружаю отчёты","Это займёт пару секунд."));return}
   if(!has){$("dayTitle").textContent="Отчётов пока нет";main.append(emptyBox("Здесь появятся ежедневные отчёты","Попросите Claude в чате «сделай отчёт за вчера», и день добавится сюда."));return}
   if(st.ent==="SALES"){$("dayTitle").textContent="Все дни в дневнике: с "+dLabel(st.dates[0])+" по "+dLabel(st.dates[st.dates.length-1]);main.append(salesView());return}
-  if(st.ent==="MONTH"){const mk=st.month||(st.date||"").slice(0,7);$("dayTitle").textContent="Итоги месяца по дням с отчётом";main.append(monthView());return}
+  if(st.ent==="MONTH"){$("dayTitle").textContent="Закрытые месяцы по дашбордам Ozon";main.append(monthView());return}
   const dt=fromIso(st.date);let title=dt.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   $("dayTitle").textContent="Заказы за "+title+" (МСК, по дате «Принят в обработку»)";
   const cur=totalsFor(st.date,st.ent);
@@ -425,70 +426,97 @@ function salesView(){
 
 const MN=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const mLabel=k=>{const[y,m]=k.split("-").map(Number);return MN[m-1][0].toUpperCase()+MN[m-1].slice(1)+" "+y};
-const daysIn=k=>{const[y,m]=k.split("-").map(Number);return new Date(y,m,0).getDate()};
-const SUMK=["q","rev","paid","comm","acq","tax","log","cost","ads","profit","frev","fprofit","canc"];
-function ratios(t){t.spp=t.rev?1-t.paid/t.rev:null;t.m=t.rev?t.profit/t.rev:null;t.fm=t.frev?t.fprofit/t.frev:null;t.drr=t.rev?Math.abs(t.ads)/t.rev:null;return t}
-function addTo(a,b){SUMK.forEach(k=>a[k]=(a[k]||0)+(b[k]||0));return a}
-function monthAgg(mk,ent){
-  const ds=st.dates.filter(d=>d.slice(0,7)===mk);const ents=ent==="ALL"?["WH","FX"]:[ent];
-  const tot={},mods={},days=[];
-  ds.forEach(d=>{let dt=null;ents.forEach(e=>{const r=st.reports[d][e];if(!r)return;addTo(tot,r.totals);dt=addTo(dt||{},r.totals);
-    (r.models||[]).forEach(m=>{const nm=(ent==="ALL"?(e==="WH"?"ИП · ":"Ф · "):"")+m.name;const M=mods[nm]=mods[nm]||{name:nm,arts:{}};addTo(M,m);
-      (m.arts||[]).forEach(a=>{const A=M.arts[a.name]=M.arts[a.name]||{name:a.name};addTo(A,a)})})});
-    if(dt)days.push({d,t:ratios(dt)})});
-  if(!days.length)return null;
-  const models=Object.values(mods).map(M=>{M.arts=Object.values(M.arts).map(ratios);return ratios(M)});
-  return{totals:ratios(tot),models,days,n:days.length};
-}
-function avgOf(a){if(!a)return null;const t={};SUMK.forEach(k=>t[k]=(a.totals[k]||0)/a.n);return ratios(t)}
+const dShort=s=>{const[y,m,d]=s.split("-");return d+"."+m};
+function mergeTree(a,b){if(!a)return b;if(!b)return a;const n={name:a.name,v:(a.v||0)+(b.v||0)};
+  if(a.ch||b.ch){const map=new Map();(a.ch||[]).forEach(c=>map.set(c.name,c));(b.ch||[]).forEach(c=>map.set(c.name,map.has(c.name)?mergeTree(map.get(c.name),c):c));n.ch=[...map.values()]}return n}
+function findNode(t,name){if(!t)return null;if(t.name===name)return t;for(const c of t.ch||[]){const r=findNode(c,name);if(r)return r}return null}
+function mDoc(mk,ent){const r=st.months[mk];if(!r)return null;if(ent!=="ALL")return r[ent]||null;
+  if(!r.WH||!r.FX)return r.WH||r.FX||null;const a=r.WH,b=r.FX;const s={};Object.keys(a.sales).forEach(k=>s[k]=(a.sales[k]||0)+(b.sales[k]||0));s.avg=s.buyQ?s.buy/s.buyQ:null;
+  return{kind:"month",month:mk,entity:"ALL",period:a.period,sales:s,payout:a.payout+b.payout,profit:a.profit+b.profit,hold:mergeTree(a.hold,b.hold),costTax:mergeTree(a.costTax,b.costTax),ext:(a.ext||0)+(b.ext||0)}}
+function mKeys(d){if(!d)return null;const ads=findNode(d.hold,"Продвижение и реклама"),cost=findNode(d.costTax,"Себестоимость"),tax=findNode(d.costTax,"Налог"),com=findNode(d.hold,"Комиссия"),dl=findNode(d.hold,"Услуги доставки");
+  const rev=d.sales.rev;const k={rev,q:d.sales.revQ,payout:d.payout,profit:d.profit,hold:d.hold.v,ads:ads?ads.v:0,cost:cost?cost.v:0,tax:tax?tax.v:0,com:com?com.v:0,dl:dl?dl.v:0,ext:d.ext?Math.abs(d.ext):0};
+  k.m=rev?k.profit/rev:null;k.holdP=rev?-k.hold/rev:null;k.drr=rev?-k.ads/rev:null;k.ret=d.sales.buy?-d.sales.ret/d.sales.buy:null;return k}
 function monthView(){
   const w=el("div","col");
-  const months=[...new Set(st.dates.map(d=>d.slice(0,7)))].sort();
-  if(!st.month||!months.includes(st.month))st.month=(st.date||st.dates[st.dates.length-1]).slice(0,7);
+  const months=Object.keys(st.months).sort();
+  if(!months.length){w.append(emptyBox("Закрытых месяцев пока нет","Пришлите Claude месячный дашборд Ozon (Excel) — месяц появится здесь."));return w}
+  if(!st.month||!st.months[st.month])st.month=months[months.length-1];
   const seg=(opts,cur,on)=>{const s=el("div","tabs");Object.entries(opts).forEach(([k,v])=>{const b=el("button","tab",v);b.type="button";b.setAttribute("aria-pressed",String(k===cur));b.setAttribute("aria-selected",String(k===cur));b.addEventListener("click",()=>on(k));s.append(b)});return s};
   const MO={};months.slice().reverse().forEach(m=>MO[m]=mLabel(m));
   const ctr=el("div","ctrls");ctr.append(seg(MO,st.month,k=>{st.month=k;render()}),seg({ALL:"Оба",WH:"ИП",FX:"Феникс"},st.mEnt,k=>{st.mEnt=k;render()}));w.append(ctr);
-  const a=monthAgg(st.month,st.mEnt);
-  if(!a){w.append(emptyBox("За этот месяц нет отчётов",st.mEnt==="ALL"?"Выберите другой месяц.":"Выберите другой месяц или кабинет."));return w}
-  const pi=months.indexOf(st.month)-1;const pa=pi>=0?monthAgg(months[pi],st.mEnt):null;
-  const cur=a.totals,av=avgOf(a),pav=avgOf(pa),dim=daysIn(st.month);const full=a.n>=dim;
-  const t=cur;
-  const k=el("div","kpis");
-  const sub=(x,unit)=>"в среднем "+fmt(x)+unit+" в день";
-  const dd=(key,kind)=>{const n=delta(av,pav,key,kind);if(!pav)n.textContent="нет прошлого месяца";return n};
-  k.append(
-    kpi("Чистая прибыль",fmt(t.profit)+" ₽","маржа "+pct(t.m),dd("profit"),true),
-    kpi("Заказано",fmt(t.q)+" шт",sub(av.q," шт"),dd("q","q")),
-    kpi("Выручка",fmt(t.rev)+" ₽","после СПП "+fmt(t.paid)+" ₽",dd("rev")),
-    kpi("СПП",pct(t.spp),"скидка Ozon",dd("spp","pp")),
-    kpi("Реклама",fmt(Math.abs(t.ads))+" ₽","ДРР "+pct(t.drr),dd("ads","cost")),
-    kpi("Прогноз при выкупе 80%",fmt(t.fprofit)+" ₽","маржа "+pct(t.fm),dd("fprofit"))
-  );
-  w.append(k);
-  let note="В месяце "+a.n+" "+plural(a.n,"день","дня","дней")+" с отчётом из "+dim+". В среднем в день: прибыль "+fmt(av.profit)+" ₽, выручка "+fmt(av.rev)+" ₽.";
-  if(!full)note+=" Если темп сохранится, за весь месяц: выручка ≈ "+fmt(av.rev*dim)+" ₽, прибыль ≈ "+fmt(av.profit*dim)+" ₽, при выкупе 80% ≈ "+fmt(av.fprofit*dim)+" ₽.";
-  note+=pav?" Изменения под цифрами — среднее в день к "+mLabel(months[pi]).toLowerCase()+" ("+pa.n+" "+plural(pa.n,"день","дня","дней")+"), чтобы неполные месяцы сравнивались честно.":"";
-  note+=" Рентабельность от цены после СПП: "+pct(t.paid?t.profit/t.paid:null)+".";
-  w.append(el("div","note",note));
+  const d=mDoc(st.month,st.mEnt);
+  if(!d){w.append(emptyBox("За этот месяц нет отчёта по кабинету","Выберите «Оба» или другой месяц."));return w}
+  const pi=months.indexOf(st.month)-1,pk=pi>=0?months[pi]:null;const pd=pk?mDoc(pk,st.mEnt):null;
+  const k=mKeys(d),pk2=mKeys(pd);
+  const dd=(key,kind)=>{const n=delta(k,pk2,key,kind);if(!pk2)n.textContent="нет прошлого месяца";return n};
+  const K=el("div","kpis");
+  K.append(kpi("Чистая прибыль",fmt(k.profit)+" ₽","рентабельность "+pct(k.m),dd("profit"),true),
+    kpi("Выручка",fmt(k.rev)+" ₽",fmt(k.q)+" шт",dd("rev")),
+    kpi("К перечислению",fmt(k.payout)+" ₽","после удержаний Ozon",dd("payout")),
+    kpi("Удержания Ozon",fmt(-k.hold)+" ₽",pct(k.holdP)+" от выручки",dd("holdP","inv")),
+    kpi("Продвижение и реклама",fmt(-k.ads)+" ₽",pct(k.drr)+" от выручки",dd("drr","inv")),
+    kpi("Себестоимость и налог",fmt(k.cost+k.tax)+" ₽",pct(k.rev?(k.cost+k.tax)/k.rev:null)+" от выручки",dd("cost","inv")));
+  w.append(K);
+  // delta tweaks: cost growth shown as plain change
+  w.append(el("div","note",mLabel(st.month)+": "+dShort(d.period[0])+"–"+dShort(d.period[1])+", закрытый месяц по дашборду Ozon"+(st.mEnt==="ALL"?" (сумма двух кабинетов)":"")+"."+(pk2?" Изменения — к "+mLabel(pk).toLowerCase()+".":"")+" Рентабельность — чистая прибыль от выручки (выкупы минус возвраты)."));
   const g=el("div","grid");const left=el("div","col"),right=el("div","col");g.append(left,right);w.append(g);
-  const mt=modelTable({models:a.models,totals:cur},null);mt.querySelector("h2").textContent="Модели и размеры за месяц";left.append(mt);
-  // days table
-  const tp=el("section","panel");tp.append(el("h2",null,"Дни месяца"));const wrap=el("div","tablewrap");const tb0=el("table","days");wrap.append(tb0);tp.append(wrap);
-  const hr=el("tr");["День","Шт","Выручка","СПП","Реклама","Прибыль","Маржа","Прибыль 80%"].forEach(x=>hr.append(el("th",null,x)));const th=el("thead");th.append(hr);tb0.append(th);
-  const tb=el("tbody");tb0.append(tb);
-  a.days.slice().reverse().forEach(({d,t})=>{const tr=el("tr","model");tr.tabIndex=0;const go=()=>{st.date=d;setEnt(st.mEnt)};tr.addEventListener("click",go);tr.addEventListener("keydown",e=>{if(e.key==="Enter"){go()}});
-    tr.append(el("td",null,fromIso(d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"})),el("td",null,fmt(t.q)),el("td",null,fmt(t.rev)),el("td",null,pct(t.spp,0)),el("td",null,fmt(Math.abs(t.ads))),el("td",t.profit<0?"neg":null,fmt(t.profit)));
-    const m=el("td");m.append(mchip(t.m));tr.append(m,el("td","f80",fmt(t.fprofit)));tb.append(tr)});
-  const tr=el("tr","total");tr.append(el("td",null,"ИТОГО"),el("td",null,fmt(t.q)),el("td",null,fmt(t.rev)),el("td",null,pct(t.spp,0)),el("td",null,fmt(Math.abs(t.ads))),el("td",null,fmt(t.profit)));const m=el("td");m.append(mchip(t.m));tr.append(m,el("td","f80",fmt(t.fprofit)));tb.append(tr);
-  tp.append(el("div","note","Нажмите на день, чтобы открыть его отчёт."));
-  left.append(tp);
-  right.append(costBreakdown(cur));
-  // months comparison
-  const mp=el("section","panel");mp.append(el("h2",null,"Все месяцы"));
-  months.slice().reverse().forEach(mk=>{const x=monthAgg(mk,st.mEnt);if(!x)return;const r=el("div","erow");const b=el("button","pill",mLabel(mk));b.style.whiteSpace="nowrap";b.addEventListener("click",()=>{st.month=mk;render()});
-    const s=el("span",null,fmt(x.totals.rev)+" ₽ · прибыль "+fmt(x.totals.profit)+" ₽ · "+x.n+" дн.");r.append(b,s);mp.append(r)});
-  right.append(mp);
+  left.append(mTable(d,pd));
+  right.append(mSales(d,pd),mBreak(k),mAll(months));
   return w;
+}
+function mTable(d,pd){
+  const both=st.mEnt==="ALL"&&st.months[st.month].WH&&st.months[st.month].FX;
+  const p=el("section","panel");const h=el("div","panel-head");h.append(el("h2",null,"Финансы месяца"),el("span","label","нажмите на строку, чтобы раскрыть"));p.append(h);
+  const wrap=el("div","tablewrap");const t=el("table","mt");wrap.append(t);p.append(wrap);
+  const cols=both?["Статья","ИП","Феникс","Всего","% выручки"]:["Статья","₽","% выручки",pd?"Δ к "+mLabel(pd.month).split(" ")[0].toLowerCase():"Δ"];
+  const hr=el("tr");cols.forEach(x=>hr.append(el("th",null,x)));const th=el("thead");th.append(hr);t.append(th);const tb=el("tbody");t.append(tb);
+  const W=both?st.months[st.month].WH:null,F=both?st.months[st.month].FX:null;
+  const rev=d.sales.rev;
+  const pick=(doc,path,v)=>{if(!doc)return null;if(path==="rev")return doc.sales.rev;if(path==="payout")return doc.payout;if(path==="profit")return doc.profit;if(path==="ext")return doc.ext?-Math.abs(doc.ext):0;
+    const [tree,name,sign]=path;const n=findNode(doc[tree],name);return n?n.v*sign:null};
+  const line=(label,v,path,cls,depth,hasCh,key)=>{const tr=el("tr",cls||"");const td=el("td",null,label);td.style.paddingLeft=(8+depth*16)+"px";
+    if(hasCh){tr.classList.add("model");if(st.mopen.has(key))tr.classList.add("open");tr.tabIndex=0;const tg=()=>{st.mopen.has(key)?st.mopen.delete(key):st.mopen.add(key);render()};tr.addEventListener("click",tg);tr.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();tg()}})}
+    else if(depth>0)tr.classList.add("art");
+    tr.append(td);
+    const cell=x=>el("td",x<0?"neg":null,fmt(x));
+    if(both){tr.append(cell(pick(W,path)),cell(pick(F,path)),cell(v))}else tr.append(cell(v));
+    tr.append(el("td",null,pct(rev?Math.abs(v)/rev:null)));
+    if(!both){const td2=el("td");const pv=pick(pd,path);if(pd&&pv!=null){const x=v-pv;td2.append(el("span","d "+(x>0?"up":x<0?"dn":"eq"),sgn(x,fmt)))}else td2.append(el("span","d eq","—"));tr.append(td2)}
+    tb.append(tr)};
+  const tree=(n,treeName,sign,depth,key)=>{const has=n.ch&&n.ch.length;line(n.name,n.v*sign,[treeName,n.name,sign],null,depth,has,key);if(has&&st.mopen.has(key))n.ch.forEach(c=>tree(c,treeName,sign,depth+1,key+"/"+c.name))};
+  line("Выручка (выкупы − возвраты)",rev,"rev","total",0);
+  const hold=d.hold;line(hold.name,hold.v,["hold",hold.name,1],"model"+(st.mopen.has("H")?" open":""),0,true,"H");
+  if(st.mopen.has("H"))hold.ch.forEach(c=>tree(c,"hold",1,1,"H/"+c.name));
+  line("К перечислению",d.payout,"payout","total",0);
+  d.costTax.ch.forEach(c=>tree(c,"costTax",-1,0,"C/"+c.name));
+  line("Внешняя РК",d.ext?-Math.abs(d.ext):0,"ext",null,0);
+  line("Чистая прибыль",d.profit,"profit","total",0);
+  if(!st.mopen.has("H"))p.append(el("div","note","Раскройте «Удержания и компенсации Ozon», чтобы увидеть комиссию, логистику, рекламу и все услуги, как в дашборде."));
+  return p;
+}
+function mSales(d,pd){
+  const p=el("section","panel ent");p.append(el("h2",null,"Продажи"));const s=d.sales,ps=pd?pd.sales:null;
+  const row=(k,v,q,pv)=>{const x=el("div","erow");x.append(el("span",null,k));const sp=el("span",null,fmt(v)+" ₽ · "+fmt(q)+" шт");if(pv!=null){const dv=v-pv;sp.append(document.createTextNode(" "));sp.append(el("span","d "+(dv>0?"up":dv<0?"dn":"eq"),sgn(dv,fmt)))}x.append(sp);p.append(x)};
+  row("Выкупы",s.buy,s.buyQ,ps&&ps.buy);row("Возвраты",s.ret,s.retQ,ps&&ps.ret);row("Выручка",s.rev,s.revQ,ps&&ps.rev);
+  const x=el("div","erow");x.append(el("span",null,"Средняя цена продажи"),el("span",null,fmt(s.avg)+" ₽"));p.append(x);
+  const y=el("div","erow");y.append(el("span",null,"Доля возвратов"),el("span",null,pct(s.buy?-s.ret/s.buy:null)+" по сумме · "+pct(s.buyQ?s.retQ/s.buyQ:null)+" по шт"));p.append(y);
+  return p;
+}
+function mBreak(k){
+  const p=el("section","panel");const h=el("div","panel-head");h.append(el("h2",null,"Куда уходит выручка"),el("span","label",fmt(k.rev)+" ₽"));p.append(h);
+  const other=-k.hold+k.com+k.dl+k.ads;
+  const parts=[["Комиссия Ozon",-k.com,"--c-comm"],["Логистика (услуги доставки)",-k.dl,"--c-log"],["Реклама и продвижение",-k.ads,"--c-ads"],["Прочие услуги Ozon",other,"--c-tax"],["Себестоимость",k.cost,"--c-cost"],["Налог и внешняя РК",k.tax+k.ext,"--muted"],["Чистая прибыль",k.profit,"--c-prof"]];
+  const bar=el("div","stack");bar.setAttribute("role","img");bar.setAttribute("aria-label","Структура выручки за месяц");
+  parts.forEach(([n,v,c])=>{if(v>0){const i=el("i");i.style.width=(v/k.rev*100)+"%";i.style.background="var("+c+")";i.title=n+": "+fmt(v)+" ₽";bar.append(i)}});p.append(bar);
+  const lg=el("div","legend");parts.forEach(([n,v,c])=>{const s=el("span","k");const sw=el("i");sw.style.background="var("+c+")";s.append(sw,document.createTextNode(n));lg.append(s,el("b",v<0?"neg":null,fmt(v)+" ₽"),el("span","p",pct(k.rev?v/k.rev:null)))});p.append(lg);
+  return p;
+}
+function mAll(months){
+  const p=el("section","panel");p.append(el("h2",null,"Все закрытые месяцы"));const wrap=el("div","tablewrap");const t=el("table","days");t.style.minWidth="0";wrap.append(t);p.append(wrap);
+  const hr=el("tr");["Месяц","Выручка","Прибыль","Рент."].forEach(x=>hr.append(el("th",null,x)));const th=el("thead");th.append(hr);t.append(th);const tb=el("tbody");t.append(tb);
+  months.slice().reverse().forEach(mk=>{const k=mKeys(mDoc(mk,st.mEnt));if(!k)return;const tr=el("tr","model"+(mk===st.month?" open":""));tr.addEventListener("click",()=>{st.month=mk;render()});
+    tr.append(el("td",null,mLabel(mk)),el("td",null,fmt(k.rev)),el("td",k.profit<0?"neg":null,fmt(k.profit)));const m=el("td");m.append(mchip(k.m));tr.append(m);tb.append(tr)});
+  return p;
 }
 function setEnt(e){st.ent=e;try{localStorage.setItem("ozon-ent",e)}catch(x){}render()}
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>setEnt(t.dataset.ent)));
@@ -508,7 +536,7 @@ async function decrypt(pw){
   if(e.gz){buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer()}
   return JSON.parse(new TextDecoder().decode(buf));
 }
-function load(docs){const rep={};docs.forEach(v=>{if(v&&v.date&&v.entity&&v.totals){(rep[v.date]=rep[v.date]||{})[v.entity]=v}});
+function load(docs){const rep={},mon={};docs.forEach(v=>{if(v&&v.kind==="month"&&v.month&&v.entity){(mon[v.month]=mon[v.month]||{})[v.entity]=v}else if(v&&v.date&&v.entity&&v.totals){(rep[v.date]=rep[v.date]||{})[v.entity]=v}});st.months=mon;
   st.reports=rep;st.dates=Object.keys(rep).sort();st.loaded=true;st.date=st.dates[st.dates.length-1]||null;render()}
 async function unlock(pw,remember){
   const msg=$("lockMsg");msg.textContent="Проверяю пароль…";
