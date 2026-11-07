@@ -174,6 +174,7 @@ table.days tr.model td:first-child::before{content:none}
     <button type="button" role="tab" class="tab" id="tab-FX" data-ent="FX" aria-selected="false">ООО Феникс</button>
     <button type="button" role="tab" class="tab" id="tab-ALL" data-ent="ALL" aria-selected="false">Оба</button>
     <button type="button" role="tab" class="tab" id="tab-SALES" data-ent="SALES" aria-selected="false">Продажи за период</button>
+    <button type="button" role="tab" class="tab" id="tab-MONTH" data-ent="MONTH" aria-selected="false">По месяцам</button>
   </nav>
 
   <div class="banner" id="banner" hidden></div>
@@ -185,8 +186,8 @@ const $=id=>document.getElementById(id);
 const ENT={WH:"ИП Warm Hearts",FX:"ООО Феникс"};
 const NEW=["KY6612","KY6613","KY6614","KY6615","KY6616"];
 const st={reports:{},dates:[],date:null,ent:"WH",open:new Set(),loaded:false};
-try{const e=localStorage.getItem("ozon-ent");if(e&&["WH","FX","ALL","SALES"].includes(e))st.ent=e}catch(e){}
-st.period="all";st.metric="rev";
+try{const e=localStorage.getItem("ozon-ent");if(e&&["WH","FX","ALL","SALES","MONTH"].includes(e))st.ent=e}catch(e){}
+st.period="all";st.metric="rev";st.month=null;st.mEnt="ALL";
 
 const fmt=n=>n==null||!isFinite(n)?"—":Math.round(n).toLocaleString("ru-RU");
 const pct=(n,d=1)=>n==null||!isFinite(n)?"—":(n*100).toLocaleString("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d})+"%";
@@ -237,6 +238,7 @@ function render(){
   if(!st.loaded){$("dayTitle").textContent="Загружаю отчёты…";main.append(emptyBox("Загружаю отчёты","Это займёт пару секунд."));return}
   if(!has){$("dayTitle").textContent="Отчётов пока нет";main.append(emptyBox("Здесь появятся ежедневные отчёты","Попросите Claude в чате «сделай отчёт за вчера», и день добавится сюда."));return}
   if(st.ent==="SALES"){$("dayTitle").textContent="Все дни в дневнике: с "+dLabel(st.dates[0])+" по "+dLabel(st.dates[st.dates.length-1]);main.append(salesView());return}
+  if(st.ent==="MONTH"){const mk=st.month||(st.date||"").slice(0,7);$("dayTitle").textContent="Итоги месяца по дням с отчётом";main.append(monthView());return}
   const dt=fromIso(st.date);let title=dt.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   $("dayTitle").textContent="Заказы за "+title+" (МСК, по дате «Принят в обработку»)";
   const cur=totalsFor(st.date,st.ent);
@@ -418,6 +420,74 @@ function salesView(){
     tr.append(el("td",null,fromIso(d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"})),el("td",null,fmt(T.q)),el("td",null,fmt(rw)),el("td",null,fmt(rf)),el("td",null,fmt(rw+rf)),el("td",null,fmt(Math.abs(T.ads))),el("td",T.profit<0?"neg":null,fmt(T.profit)));const m=el("td");m.append(mchip(T.m));tr.append(m,el("td",null,fmt(T.fprofit)));tb.append(tr)});
   const tr=el("tr","total");const rr=S.rw+S.rf;tr.append(el("td",null,"ИТОГО"),el("td",null,fmt(S.q)),el("td",null,fmt(S.rw)),el("td",null,fmt(S.rf)),el("td",null,fmt(rr)),el("td",null,fmt(Math.abs(S.ads))),el("td",null,fmt(S.pr)));const m=el("td");m.append(mchip(rr?S.pr/rr:null));tr.append(m,el("td",null,fmt(S.fp)));tb.append(tr);
   w.append(tp);
+  return w;
+}
+
+const MN=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+const mLabel=k=>{const[y,m]=k.split("-").map(Number);return MN[m-1][0].toUpperCase()+MN[m-1].slice(1)+" "+y};
+const daysIn=k=>{const[y,m]=k.split("-").map(Number);return new Date(y,m,0).getDate()};
+const SUMK=["q","rev","paid","comm","acq","tax","log","cost","ads","profit","frev","fprofit","canc"];
+function ratios(t){t.spp=t.rev?1-t.paid/t.rev:null;t.m=t.rev?t.profit/t.rev:null;t.fm=t.frev?t.fprofit/t.frev:null;t.drr=t.rev?Math.abs(t.ads)/t.rev:null;return t}
+function addTo(a,b){SUMK.forEach(k=>a[k]=(a[k]||0)+(b[k]||0));return a}
+function monthAgg(mk,ent){
+  const ds=st.dates.filter(d=>d.slice(0,7)===mk);const ents=ent==="ALL"?["WH","FX"]:[ent];
+  const tot={},mods={},days=[];
+  ds.forEach(d=>{let dt=null;ents.forEach(e=>{const r=st.reports[d][e];if(!r)return;addTo(tot,r.totals);dt=addTo(dt||{},r.totals);
+    (r.models||[]).forEach(m=>{const nm=(ent==="ALL"?(e==="WH"?"ИП · ":"Ф · "):"")+m.name;const M=mods[nm]=mods[nm]||{name:nm,arts:{}};addTo(M,m);
+      (m.arts||[]).forEach(a=>{const A=M.arts[a.name]=M.arts[a.name]||{name:a.name};addTo(A,a)})})});
+    if(dt)days.push({d,t:ratios(dt)})});
+  if(!days.length)return null;
+  const models=Object.values(mods).map(M=>{M.arts=Object.values(M.arts).map(ratios);return ratios(M)});
+  return{totals:ratios(tot),models,days,n:days.length};
+}
+function avgOf(a){if(!a)return null;const t={};SUMK.forEach(k=>t[k]=(a.totals[k]||0)/a.n);return ratios(t)}
+function monthView(){
+  const w=el("div","col");
+  const months=[...new Set(st.dates.map(d=>d.slice(0,7)))].sort();
+  if(!st.month||!months.includes(st.month))st.month=(st.date||st.dates[st.dates.length-1]).slice(0,7);
+  const seg=(opts,cur,on)=>{const s=el("div","tabs");Object.entries(opts).forEach(([k,v])=>{const b=el("button","tab",v);b.type="button";b.setAttribute("aria-pressed",String(k===cur));b.setAttribute("aria-selected",String(k===cur));b.addEventListener("click",()=>on(k));s.append(b)});return s};
+  const MO={};months.slice().reverse().forEach(m=>MO[m]=mLabel(m));
+  const ctr=el("div","ctrls");ctr.append(seg(MO,st.month,k=>{st.month=k;render()}),seg({ALL:"Оба",WH:"ИП",FX:"Феникс"},st.mEnt,k=>{st.mEnt=k;render()}));w.append(ctr);
+  const a=monthAgg(st.month,st.mEnt);
+  if(!a){w.append(emptyBox("За этот месяц нет отчётов",st.mEnt==="ALL"?"Выберите другой месяц.":"Выберите другой месяц или кабинет."));return w}
+  const pi=months.indexOf(st.month)-1;const pa=pi>=0?monthAgg(months[pi],st.mEnt):null;
+  const cur=a.totals,av=avgOf(a),pav=avgOf(pa),dim=daysIn(st.month);const full=a.n>=dim;
+  const t=cur;
+  const k=el("div","kpis");
+  const sub=(x,unit)=>"в среднем "+fmt(x)+unit+" в день";
+  const dd=(key,kind)=>{const n=delta(av,pav,key,kind);if(!pav)n.textContent="нет прошлого месяца";return n};
+  k.append(
+    kpi("Чистая прибыль",fmt(t.profit)+" ₽","маржа "+pct(t.m),dd("profit"),true),
+    kpi("Заказано",fmt(t.q)+" шт",sub(av.q," шт"),dd("q","q")),
+    kpi("Выручка",fmt(t.rev)+" ₽","после СПП "+fmt(t.paid)+" ₽",dd("rev")),
+    kpi("СПП",pct(t.spp),"скидка Ozon",dd("spp","pp")),
+    kpi("Реклама",fmt(Math.abs(t.ads))+" ₽","ДРР "+pct(t.drr),dd("ads","cost")),
+    kpi("Прогноз при выкупе 80%",fmt(t.fprofit)+" ₽","маржа "+pct(t.fm),dd("fprofit"))
+  );
+  w.append(k);
+  let note="В месяце "+a.n+" "+plural(a.n,"день","дня","дней")+" с отчётом из "+dim+". В среднем в день: прибыль "+fmt(av.profit)+" ₽, выручка "+fmt(av.rev)+" ₽.";
+  if(!full)note+=" Если темп сохранится, за весь месяц: выручка ≈ "+fmt(av.rev*dim)+" ₽, прибыль ≈ "+fmt(av.profit*dim)+" ₽, при выкупе 80% ≈ "+fmt(av.fprofit*dim)+" ₽.";
+  note+=pav?" Изменения под цифрами — среднее в день к "+mLabel(months[pi]).toLowerCase()+" ("+pa.n+" "+plural(pa.n,"день","дня","дней")+"), чтобы неполные месяцы сравнивались честно.":"";
+  note+=" Рентабельность от цены после СПП: "+pct(t.paid?t.profit/t.paid:null)+".";
+  w.append(el("div","note",note));
+  const g=el("div","grid");const left=el("div","col"),right=el("div","col");g.append(left,right);w.append(g);
+  const mt=modelTable({models:a.models,totals:cur},null);mt.querySelector("h2").textContent="Модели и размеры за месяц";left.append(mt);
+  // days table
+  const tp=el("section","panel");tp.append(el("h2",null,"Дни месяца"));const wrap=el("div","tablewrap");const tb0=el("table","days");wrap.append(tb0);tp.append(wrap);
+  const hr=el("tr");["День","Шт","Выручка","СПП","Реклама","Прибыль","Маржа","Прибыль 80%"].forEach(x=>hr.append(el("th",null,x)));const th=el("thead");th.append(hr);tb0.append(th);
+  const tb=el("tbody");tb0.append(tb);
+  a.days.slice().reverse().forEach(({d,t})=>{const tr=el("tr","model");tr.tabIndex=0;const go=()=>{st.date=d;setEnt(st.mEnt)};tr.addEventListener("click",go);tr.addEventListener("keydown",e=>{if(e.key==="Enter"){go()}});
+    tr.append(el("td",null,fromIso(d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"})),el("td",null,fmt(t.q)),el("td",null,fmt(t.rev)),el("td",null,pct(t.spp,0)),el("td",null,fmt(Math.abs(t.ads))),el("td",t.profit<0?"neg":null,fmt(t.profit)));
+    const m=el("td");m.append(mchip(t.m));tr.append(m,el("td","f80",fmt(t.fprofit)));tb.append(tr)});
+  const tr=el("tr","total");tr.append(el("td",null,"ИТОГО"),el("td",null,fmt(t.q)),el("td",null,fmt(t.rev)),el("td",null,pct(t.spp,0)),el("td",null,fmt(Math.abs(t.ads))),el("td",null,fmt(t.profit)));const m=el("td");m.append(mchip(t.m));tr.append(m,el("td","f80",fmt(t.fprofit)));tb.append(tr);
+  tp.append(el("div","note","Нажмите на день, чтобы открыть его отчёт."));
+  left.append(tp);
+  right.append(costBreakdown(cur));
+  // months comparison
+  const mp=el("section","panel");mp.append(el("h2",null,"Все месяцы"));
+  months.slice().reverse().forEach(mk=>{const x=monthAgg(mk,st.mEnt);if(!x)return;const r=el("div","erow");const b=el("button","pill",mLabel(mk));b.style.whiteSpace="nowrap";b.addEventListener("click",()=>{st.month=mk;render()});
+    const s=el("span",null,fmt(x.totals.rev)+" ₽ · прибыль "+fmt(x.totals.profit)+" ₽ · "+x.n+" дн.");r.append(b,s);mp.append(r)});
+  right.append(mp);
   return w;
 }
 function setEnt(e){st.ent=e;try{localStorage.setItem("ozon-ent",e)}catch(x){}render()}
