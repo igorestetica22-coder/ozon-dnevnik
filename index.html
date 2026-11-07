@@ -432,7 +432,7 @@ function mergeTree(a,b){if(!a)return b;if(!b)return a;const n={name:a.name,v:(a.
 function findNode(t,name){if(!t)return null;if(t.name===name)return t;for(const c of t.ch||[]){const r=findNode(c,name);if(r)return r}return null}
 function mDoc(mk,ent){const r=st.months[mk];if(!r)return null;if(ent!=="ALL")return r[ent]||null;
   if(!r.WH||!r.FX)return r.WH||r.FX||null;const a=r.WH,b=r.FX;const s={};Object.keys(a.sales).forEach(k=>s[k]=(a.sales[k]||0)+(b.sales[k]||0));s.avg=s.buyQ?s.buy/s.buyQ:null;
-  return{kind:"month",month:mk,entity:"ALL",period:a.period,sales:s,payout:a.payout+b.payout,profit:a.profit+b.profit,hold:mergeTree(a.hold,b.hold),costTax:mergeTree(a.costTax,b.costTax),ext:(a.ext||0)+(b.ext||0)}}
+  return{kind:"month",month:mk,entity:"ALL",period:a.period,sales:s,payout:a.payout+b.payout,profit:a.profit+b.profit,hold:mergeTree(a.hold,b.hold),costTax:mergeTree(a.costTax,b.costTax),ext:(a.ext||0)+(b.ext||0),note:[a.note?"ИП: "+a.note:"",b.note?"Феникс: "+b.note:""].filter(Boolean).join(" ")}}
 function mKeys(d){if(!d)return null;const ads=findNode(d.hold,"Продвижение и реклама"),cost=findNode(d.costTax,"Себестоимость"),tax=findNode(d.costTax,"Налог"),com=findNode(d.hold,"Комиссия"),dl=findNode(d.hold,"Услуги доставки");
   const rev=d.sales.rev;const k={rev,q:d.sales.revQ,payout:d.payout,profit:d.profit,hold:d.hold.v,ads:ads?ads.v:0,cost:cost?cost.v:0,tax:tax?tax.v:0,com:com?com.v:0,dl:dl?dl.v:0,ext:d.ext?Math.abs(d.ext):0};
   k.m=rev?k.profit/rev:null;k.holdP=rev?-k.hold/rev:null;k.drr=rev?-k.ads/rev:null;k.ret=d.sales.buy?-d.sales.ret/d.sales.buy:null;return k}
@@ -453,12 +453,13 @@ function monthView(){
   K.append(kpi("Чистая прибыль",fmt(k.profit)+" ₽","рентабельность "+pct(k.m),dd("profit"),true),
     kpi("Выручка",fmt(k.rev)+" ₽",fmt(k.q)+" шт",dd("rev")),
     kpi("К перечислению",fmt(k.payout)+" ₽","после удержаний Ozon",dd("payout")),
-    kpi("Удержания Ozon",fmt(-k.hold)+" ₽",pct(k.holdP)+" от выручки",dd("holdP","inv")),
-    kpi("Продвижение и реклама",fmt(-k.ads)+" ₽",pct(k.drr)+" от выручки",dd("drr","inv")),
-    kpi("Себестоимость и налог",fmt(k.cost+k.tax)+" ₽",pct(k.rev?(k.cost+k.tax)/k.rev:null)+" от выручки",dd("cost","inv")));
+    kpi("Удержания Ozon",fmt(-k.hold)+" ₽",pct(k.holdP)+" от выручки",dd("hold","cost")),
+    kpi("Продвижение и реклама",fmt(-k.ads)+" ₽",pct(k.drr)+" от выручки",dd("ads","cost")),
+    kpi("Себестоимость и налог",fmt(k.cost+k.tax)+" ₽",pct(k.rev?(k.cost+k.tax)/k.rev:null)+" от выручки",dd("cost","cost")));
   w.append(K);
   // delta tweaks: cost growth shown as plain change
   w.append(el("div","note",mLabel(st.month)+": "+dShort(d.period[0])+"–"+dShort(d.period[1])+", закрытый месяц по дашборду Ozon"+(st.mEnt==="ALL"?" (сумма двух кабинетов)":"")+"."+(pk2?" Изменения — к "+mLabel(pk).toLowerCase()+".":"")+" Рентабельность — чистая прибыль от выручки (выкупы минус возвраты)."));
+  if(d.note){const nn=el("div","note",d.note);nn.style.color="var(--warn)";w.append(nn)}
   const g=el("div","grid");const left=el("div","col"),right=el("div","col");g.append(left,right);w.append(g);
   left.append(mTable(d,pd));
   right.append(mSales(d,pd),mBreak(k),mAll(months));
