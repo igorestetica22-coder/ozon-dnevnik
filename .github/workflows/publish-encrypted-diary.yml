@@ -1,0 +1,58 @@
+name: Publish encrypted Ozon diary
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'reports/inbox/*.sealed.json'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ozon-encrypted-publish
+  cancel-in-progress: false
+jobs:
+  merge-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Prepare Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install crypto dependency
+        run: python -m pip install 'cryptography==44.0.3'
+      - name: Check required secrets (values never logged)
+        env:
+          DIARY_PASSWORD: ${{ secrets.DIARY_PASSWORD }}
+          INGEST_PRIVATE_KEY_B64: ${{ secrets.INGEST_PRIVATE_KEY_B64 }}
+        run: |
+          if [ -z "$DIARY_PASSWORD" ] || [ -z "$INGEST_PRIVATE_KEY_B64" ]; then
+            echo 'Configure Actions secrets DIARY_PASSWORD and INGEST_PRIVATE_KEY_B64 before publishing.' >&2
+            exit 1
+          fi
+      - name: Merge and encrypt without exposing plaintext
+        env:
+          DIARY_PASSWORD: ${{ secrets.DIARY_PASSWORD }}
+          INGEST_PRIVATE_KEY_B64: ${{ secrets.INGEST_PRIVATE_KEY_B64 }}
+        run: |
+          git fetch origin gh-pages
+          git show origin/gh-pages:data.enc.json > "$RUNNER_TEMP/diary-existing.enc.json"
+          python scripts/publish_encrypted_diary.py \
+            --archive "$RUNNER_TEMP/diary-existing.enc.json" \
+            --inbox reports/inbox \
+            --output "$RUNNER_TEMP/diary-new.enc.json"
+      - name: Publish only encrypted archive to GitHub Pages
+        run: |
+          git switch -C gh-pages origin/gh-pages
+          cp "$RUNNER_TEMP/diary-new.enc.json" data.enc.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data.enc.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update encrypted Ozon daily diary'
+            git push origin HEAD:gh-pages
+          fi
