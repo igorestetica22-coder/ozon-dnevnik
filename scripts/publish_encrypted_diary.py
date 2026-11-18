@@ -29,6 +29,8 @@ def decrypt_sealed(path, private_key):
         padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
     )
     plain = AESGCM(key).decrypt(ub64(sealed["iv"]), ub64(sealed["ct"]), b"ozon-daily-report-v1")
+    if sealed.get("gz"):
+        plain = gzip.decompress(plain)
     report = json.loads(plain)
     if not isinstance(report, dict) or not isinstance(report.get("models"), list) or not isinstance(report.get("totals"), dict):
         raise ValueError("Invalid daily report")
