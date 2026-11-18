@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Импорт дня — Дневник Ozon</title>
+<style>
+:root{font:15px/1.55 system-ui,-apple-system,sans-serif;color:#172331;background:#f1f4f8}
+body{margin:0;padding:32px 16px}main{max-width:650px;margin:auto;background:#fff;border:1px solid #d9e1e9;border-radius:18px;padding:25px}
+h1{font-size:23px;margin:0 0 8px}p{color:#516072}label{display:block;font-weight:650;margin:20px 0 6px}
+input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #b7c4d2;border-radius:9px;font:inherit}
+button{background:#245bd5;color:white;border:0;padding:12px 18px;border-radius:9px;font:inherit;font-weight:650;cursor:pointer;margin-top:22px}
+button:disabled{opacity:.5;cursor:default}#result{white-space:pre-wrap;margin-top:18px;color:#14543a}small{display:block;color:#67798a;margin-top:12px}.err{color:#ae2929!important}
+</style></head><body><main>
+<h1>Добавить день в дневник Ozon</h1>
+<p>Этот инструмент создаёт новую зашифрованную версию архива. Пароль используется только в вашем браузере и никуда не отправляется. Исходный архив GitHub не изменяется.</p>
+<label for="report">Файл нового отчёта (.json)</label><input id="report" type="file" accept=".json,application/json">
+<label for="pw">Пароль существующего дневника</label><input id="pw" type="password" autocomplete="off" placeholder="Тот же пароль, что на странице дневника">
+<button id="go" type="button">Объединить и скачать зашифрованный архив</button>
+<div id="result" role="status"></div>
+<small>Данные не публикуются открыто. Готовый файл data.enc.json можно передать для обновления репозитория. Существующие дни останутся в архиве.</small>
+<p><a href="./">Вернуться в дневник</a></p>
+</main><script>
+const $=id=>document.getElementById(id);
+const enc=new TextEncoder(),dec=new TextDecoder();
+const from64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+function to64(buf){const u=new Uint8Array(buf);let s="";for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode(...u.subarray(i,i+8192));return btoa(s)}
+async function keyFor(pw,salt,iter){
+ const base=await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveKey"]);
+ return await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["decrypt","encrypt"])
+}
+function download(obj){
+ const blob=new Blob([JSON.stringify(obj)],{type:"application/json"});
+ const url=URL.createObjectURL(blob);const a=document.createElement("a");
+ a.href=url;a.download="data.enc.json";document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+$("go").addEventListener("click",async()=>{
+ const out=$("result"),go=$("go");out.className="";out.textContent="";
+ const file=$("report").files[0],pw=$("pw").value;
+ if(!file||!pw){out.className="err";out.textContent="Выберите JSON отчёта и введите пароль.";return}
+ go.disabled=true;
+ try{
+  const day=JSON.parse(await file.text());
+  if(day.date!=="2026-11-17"||day.entity!=="WH"||!day.totals||!Array.isArray(day.models))throw new Error("Ожидается отчёт ИП Warm Hearts за 17.11.2026.");
+  out.textContent="Расшифровка и проверка архива…";
+  const res=await fetch("data.enc.json",{cache:"no-store"});if(!res.ok)throw new Error("Не удалось загрузить текущий архив.");
+  const old=await res.json(),salt=from64(old.salt),iv=from64(old.iv);
+  const key=await keyFor(pw,salt,old.iter);
+  let decrypted;
+  try{decrypted=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,from64(old.ct))}
+  catch(e){throw new Error("Неверный пароль или повреждён архив.")}
+  if(old.gz)decrypted=await new Response(new Blob([decrypted]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  const docs=JSON.parse(dec.decode(decrypted));
+  if(!Array.isArray(docs))throw new Error("Некорректный формат существующего архива.");
+  const idx=docs.findIndex(x=>x&&x.date===day.date&&x.entity===day.entity);
+  if(idx>=0){if(!confirm("Отчёт за 17.11.2026 для Warm Hearts уже существует. Заменить его?")){out.textContent="Без изменений.";return}docs[idx]=day}
+  else docs.push(day);
+  let payload=enc.encode(JSON.stringify(docs));let gz=false;
+  if(typeof CompressionStream!=="undefined"){
+   payload=await new Response(new Blob([payload]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();gz=true
+  }
+  const newSalt=crypto.getRandomValues(new Uint8Array(16)),newIv=crypto.getRandomValues(new Uint8Array(12));
+  const newKey=await keyFor(pw,newSalt,old.iter);
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv:newIv},newKey,payload);
+  download({salt:to64(newSalt),iv:to64(newIv),iter:old.iter,gz,ct:to64(ct)});
+  out.textContent="Готово. Скачан зашифрованный data.enc.json. Внутри сохранены прежние отчёты и добавлен Warm Hearts за 17.11.2026. Передайте скачанный файл для публикации.";
+  $("pw").value="";
+ }catch(e){out.className="err";out.textContent=e.message||String(e)}
+ finally{go.disabled=false}
+});
+</script></body></html>
