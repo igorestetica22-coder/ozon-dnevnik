@@ -249,6 +249,10 @@ function reportsForMetrics(date,entity){
   return (entity==="ALL"?[reports.WH,reports.FX]:[reports[entity]]).filter(Boolean);
 }
 const REVENUE_COST_LABEL="Выручка от себестоимости";
+const FORECAST_ROI_DESC="Прогнозная прибыль при выкупе 80% ÷ закупочная себестоимость ожидаемых выкупов × 100%";
+function forecastRoi(profit,cost){
+  return Number.isFinite(profit)&&cost>0?profit/cost:null;
+}
 const REVENUE_COST_DESC="Прогнозная выручка до СПП ÷ закупочная себестоимость ожидаемых выкупов × 100%";
 function forecastCost(t,items){
   if(Number.isFinite(t.fcost))return Math.abs(t.fcost);
@@ -374,7 +378,7 @@ function modelTable(rep,prep){
   p.append(el("div","note","Серые столбцы справа — прогноз при выкупе 80%: «Доставлен» берётся на 100%, остальные заказы на 80% (с себестоимостью), плюс обратная логистика 65,29 ₽/шт на невыкуп. Реклама и прямая логистика не уменьшаются."));
   const pm={};const pa={};if(prep)prep.models.forEach(m=>{pm[m.name]=m;m.arts.forEach(a=>pa[a.name]=a)});
   const wrap=el("div","tablewrap");const t=el("table");wrap.append(t);p.append(wrap);
-  const hr=el("tr");["Модель / артикул","Шт","Выручка","СПП","Реклама","ДРР","Прибыль","Маржа",ROI_LABEL,"Δ прибыли","Выручка 80%","Прибыль 80%","Маржа 80%",REVENUE_COST_LABEL].forEach((x,i)=>{const th=el("th",i>=10?"f80":null,x);hr.append(th)});const thd=el("thead");thd.append(hr);t.append(thd);
+  const hr=el("tr");["Модель / артикул","Шт","Выручка","СПП","Реклама","ДРР","Прибыль","Маржа",ROI_LABEL,"Δ прибыли","Выручка 80%","Прибыль 80%","Маржа 80%","Прибыль 80% от себестоимости"].forEach((x,i)=>{const th=el("th",i>=10?"f80":null,x);hr.append(th)});const thd=el("thead");thd.append(hr);t.append(thd);
   const tb=el("tbody");t.append(tb);
   const row=(cls,d,pv,name,roiTotals=d)=>{const tr=el("tr",cls);
     tr.append(el("td",null,name),el("td",null,fmt(d.q)),el("td",null,fmt(d.rev)),el("td",null,pct(d.spp,0)),el("td",null,fmt(Math.abs(d.ads))),el("td",null,pct(d.drr,1)));
@@ -383,8 +387,9 @@ function modelTable(rep,prep){
     const dd=el("td");if(pv){const x=d.profit-pv.profit;dd.append(el("span","d "+(x>0?"up":x<0?"dn":"eq"),sgn(x,fmt)))}else dd.append(el("span","d eq",prep?"новое":"—"));tr.append(dd);
     tr.append(el("td","f80",fmt(d.frev)));tr.append(el("td","f80"+(d.fprofit<0?" neg":""),fmt(d.fprofit)));const fm=el("td","f80");fm.append(mchip(d.fm));tr.append(fm);
     const items=d===rep.totals?rep.models:d.arts;
-    const ratio=revenueOnCost([{totals:d,models:items,noCost:d===rep.totals&&rep.noCost}]);
-    const rc=el("td","f80",pct(ratio));rc.title=REVENUE_COST_DESC;tr.append(rc);return tr};
+    const cost=d===rep.totals&&rep.noCost?null:forecastCost(d,items);
+    const ratio=forecastRoi(d.fprofit,cost);
+    const rc=el("td",ratio<0?"f80 neg":"f80",pct(ratio));rc.title=FORECAST_ROI_DESC;tr.append(rc);return tr};
   rep.models.slice().sort((a,b)=>b.rev-a.rev).forEach(m=>{
     const roiTotals=m.arts.some(a=>a.q>0&&roiCost(a)==null)?{...m,roiIncomplete:true}:m;
     const tr=row("model"+(st.open.has(m.name)?" open":""),m,pm[m.name],m.name,roiTotals);tr.tabIndex=0;tr.setAttribute("aria-expanded",String(st.open.has(m.name)));
@@ -475,7 +480,7 @@ function forecastSummary(report){
     }
     quantity=sum;
   }
-  return {cost,quantity,margin:forecastMargin([report]),roi:cost>0&&Number.isFinite(t.fprofit)?t.fprofit/cost:null,revenueCost:revenueOnCost([report])};
+  return {cost,quantity,margin:forecastMargin([report]),roi:forecastRoi(t.fprofit,cost),revenueCost:revenueOnCost([report])};
 }
 function bothView(){
   const w=el("div","col");const b=el("div","both");
@@ -496,7 +501,7 @@ function bothView(){
     fl("Прогнозная прибыль",fmt(t.fprofit)+" ₽",delta(t,pt,"fprofit"));
     fl(FORECAST_MARGIN_LABEL,pct(current.margin),delta(current,previous,"margin","pp")).title=FORECAST_MARGIN_DESC;
     fl("Ожидаемые выкупы",current.quantity==null?"—":current.quantity.toLocaleString("ru-RU",{maximumFractionDigits:1})+" шт");
-    fl(ROI_LABEL,pct(current.roi)).title="Прогнозная прибыль ÷ себестоимость ожидаемых выкупов × 100%";
+    fl(ROI_LABEL,pct(current.roi)).title=FORECAST_ROI_DESC;
     fl("Прогнозная выручка",fmt(t.frev)+" ₽",delta(t,pt,"frev"));
     fl("Себестоимость выкупов",current.cost==null?"—":fmt(current.cost)+" ₽");
     fl(REVENUE_COST_LABEL,pct(current.revenueCost)).title=REVENUE_COST_DESC;
