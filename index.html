@@ -462,20 +462,47 @@ function notes(rep){
   p.append(n);return p;
 }
 
+function forecastSummary(report){
+  const t=report.totals, cost=report.noCost?null:forecastCost(t,report.models);
+  let quantity=Number.isFinite(t.fqty)?t.fqty:null;
+  if(quantity==null&&report.models?.length){
+    let sum=0;
+    for(const art of report.models.flatMap(model=>model.arts)){
+      if(art.q===0)continue;
+      const c=forecastCost(art);
+      if(c==null||!(Math.abs(art.cost)>0)){sum=null;break}
+      sum+=art.q*c/Math.abs(art.cost);
+    }
+    quantity=sum;
+  }
+  return {cost,quantity,margin:forecastMargin([report]),roi:cost>0&&Number.isFinite(t.fprofit)?t.fprofit/cost:null,revenueCost:revenueOnCost([report])};
+}
 function bothView(){
   const w=el("div","col");const b=el("div","both");
+  const forecasts=el("div","both");
   ["WH","FX"].forEach(e=>{const r=st.reports[st.date][e];const c=el("section","panel ent");c.append(el("h2",null,ENT[e]));
-    if(!r){c.append(el("div","note","За этот день нет отчёта."));b.append(c);return}
+    const forecast=el("section","panel ent");forecast.append(el("h2",null,ENT[e]+" · выкуп 80%"));forecasts.append(forecast);
+    if(!r){forecast.append(el("div","note","За этот день нет отчёта."));c.append(el("div","note","За этот день нет отчёта."));b.append(c);return}
     const t=r.totals;const pd=prevDate(st.date,e),pt=pd?totalsFor(pd,e):null;
-    const line=(k,v,d)=>{const x=el("div","erow");x.append(el("span",null,k));const s=el("span");s.append(document.createTextNode(v+" "));if(d)s.append(d);x.append(s);c.append(x);return x};
+    const panelLine=(panel,k,v,d)=>{const x=el("div","erow");x.append(el("span",null,k));const s=el("span");s.append(document.createTextNode(v+" "));if(d)s.append(d);x.append(s);panel.append(x);return x};
+    const line=(k,v,d)=>panelLine(c,k,v,d);
+    const fl=(k,v,d)=>panelLine(forecast,k,v,d);
     line("Прибыль",fmt(t.profit)+" ₽",delta(t,pt,"profit"));line("Маржа",pct(t.m),delta(t,pt,"m","pp"));line("Заказано",fmt(t.q)+" шт",delta(t,pt,"q","q"));
     const rr=roiText(reportRoi(r));
     line(ROI_LABEL,rr.textContent).title=rr.title;
     line("Выручка",fmt(t.rev)+" ₽");line("Реклама",fmt(Math.abs(t.ads))+" ₽ · ДРР "+pct(t.drr));line("Прогноз 80%",fmt(t.fprofit)+" ₽");
-    line(FORECAST_MARGIN_LABEL,pct(forecastMargin([r]))).title=FORECAST_MARGIN_DESC;
-    line(REVENUE_COST_LABEL,pct(revenueOnCost([r]))).title=REVENUE_COST_DESC;
+    const current=forecastSummary(r);
+    const previous=pd?forecastSummary(st.reports[pd][e]):null;
+    fl("Прогнозная прибыль",fmt(t.fprofit)+" ₽",delta(t,pt,"fprofit"));
+    fl(FORECAST_MARGIN_LABEL,pct(current.margin),delta(current,previous,"margin","pp")).title=FORECAST_MARGIN_DESC;
+    fl("Ожидаемые выкупы",current.quantity==null?"—":current.quantity.toLocaleString("ru-RU",{maximumFractionDigits:1})+" шт");
+    fl(ROI_LABEL,pct(current.roi)).title="Прогнозная прибыль ÷ себестоимость ожидаемых выкупов × 100%";
+    fl("Прогнозная выручка",fmt(t.frev)+" ₽",delta(t,pt,"frev"));
+    fl("Себестоимость выкупов",current.cost==null?"—":fmt(current.cost)+" ₽");
+    fl(REVENUE_COST_LABEL,pct(current.revenueCost)).title=REVENUE_COST_DESC;
+    fl("Реклама",fmt(Math.abs(t.ads))+" ₽ · ДРР "+pct(t.frev>0?Math.abs(t.ads)/t.frev:null));
     const go=el("button","pill","Открыть отчёт");go.style.alignSelf="flex-start";go.addEventListener("click",()=>setEnt(e));c.append(go);b.append(c)});
-  w.append(b,trendChart());return w;
+  w.append(b,forecasts,trendChart());return w;
 }
 
 function salesRange(){
