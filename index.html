@@ -248,12 +248,11 @@ function reportsForMetrics(date,entity){
   const reports=st.reports[date];
   return (entity==="ALL"?[reports.WH,reports.FX]:[reports[entity]]).filter(Boolean);
 }
-const REVENUE_COST_LABEL="Выручка от себестоимости";
+const FORECAST_ROI_LABEL="Прибыль 80% от себестоимости";
 const FORECAST_ROI_DESC="Прогнозная прибыль при выкупе 80% ÷ закупочная себестоимость ожидаемых выкупов × 100%";
 function forecastRoi(profit,cost){
   return Number.isFinite(profit)&&cost>0?profit/cost:null;
 }
-const REVENUE_COST_DESC="Прогнозная выручка до СПП ÷ закупочная себестоимость ожидаемых выкупов × 100%";
 function forecastCost(t,items){
   if(Number.isFinite(t.fcost))return Math.abs(t.fcost);
   if(items){
@@ -276,15 +275,15 @@ function forecastCost(t,items){
   }
   return null;
 }
-function revenueOnCost(reports){
-  let revenue=0, cost=0;
+function reportsForecastRoi(reports){
+  let profit=0, cost=0;
   for(const report of reports){
     const t=report.totals, c=forecastCost(t,report.models);
-    if(report.noCost||c==null||!Number.isFinite(t.frev))return null;
-    revenue+=t.frev;
+    if(report.noCost||c==null||!Number.isFinite(t.fprofit))return null;
+    profit+=t.fprofit;
     cost+=c;
   }
-  return cost>0?revenue/cost:null;
+  return forecastRoi(profit,cost);
 }
 function combine(a,b){
   if(!a)return b;if(!b)return a;
@@ -352,10 +351,10 @@ function render(){
     kpi("Реклама",fmt(Math.abs(cur.ads))+" ₽","ДРР "+pct(cur.drr),delta(cur,prev,"ads","cost")),
     kpi("Прогноз при выкупе 80%",fmt(cur.fprofit)+" ₽","прогноз прибыли",delta(cur,prev,"fprofit")),
     kpi(FORECAST_MARGIN_LABEL,pct(forecastMargin(dailyReports)),"при выкупе 80%"),
-    kpi(REVENUE_COST_LABEL,pct(revenueOnCost(dailyReports)),"при выкупе 80%")
+    kpi(FORECAST_ROI_LABEL,pct(reportsForecastRoi(dailyReports)),"при выкупе 80%")
   );
   k.lastElementChild.previousElementSibling.title=FORECAST_MARGIN_DESC;
-  k.lastElementChild.title=REVENUE_COST_DESC;
+  k.lastElementChild.title=FORECAST_ROI_DESC;
   const roiTotals=st.ent==="ALL"?dayRoi(st.date):reportRoi(st.reports[st.date][st.ent]);
   k.firstElementChild.append(roiText(roiTotals,true));
   box.append(k);
@@ -378,7 +377,7 @@ function modelTable(rep,prep){
   p.append(el("div","note","Серые столбцы справа — прогноз при выкупе 80%: «Доставлен» берётся на 100%, остальные заказы на 80% (с себестоимостью), плюс обратная логистика 65,29 ₽/шт на невыкуп. Реклама и прямая логистика не уменьшаются."));
   const pm={};const pa={};if(prep)prep.models.forEach(m=>{pm[m.name]=m;m.arts.forEach(a=>pa[a.name]=a)});
   const wrap=el("div","tablewrap");const t=el("table");wrap.append(t);p.append(wrap);
-  const hr=el("tr");["Модель / артикул","Шт","Выручка","СПП","Реклама","ДРР","Прибыль","Маржа",ROI_LABEL,"Δ прибыли","Выручка 80%","Прибыль 80%","Маржа 80%","Прибыль 80% от себестоимости"].forEach((x,i)=>{const th=el("th",i>=10?"f80":null,x);hr.append(th)});const thd=el("thead");thd.append(hr);t.append(thd);
+  const hr=el("tr");["Модель / артикул","Шт","Выручка","СПП","Реклама","ДРР","Прибыль","Маржа",ROI_LABEL,"Δ прибыли","Выручка 80%","Прибыль 80%","Маржа 80%",FORECAST_ROI_LABEL].forEach((x,i)=>{const th=el("th",i>=10?"f80":null,x);hr.append(th)});const thd=el("thead");thd.append(hr);t.append(thd);
   const tb=el("tbody");t.append(tb);
   const row=(cls,d,pv,name,roiTotals=d)=>{const tr=el("tr",cls);
     tr.append(el("td",null,name),el("td",null,fmt(d.q)),el("td",null,fmt(d.rev)),el("td",null,pct(d.spp,0)),el("td",null,fmt(Math.abs(d.ads))),el("td",null,pct(d.drr,1)));
@@ -480,7 +479,7 @@ function forecastSummary(report){
     }
     quantity=sum;
   }
-  return {cost,quantity,margin:forecastMargin([report]),roi:forecastRoi(t.fprofit,cost),revenueCost:revenueOnCost([report])};
+  return {cost,quantity,margin:forecastMargin([report]),roi:forecastRoi(t.fprofit,cost)};
 }
 function bothView(){
   const w=el("div","col");const b=el("div","both");
@@ -501,10 +500,10 @@ function bothView(){
     fl("Прогнозная прибыль",fmt(t.fprofit)+" ₽",delta(t,pt,"fprofit"));
     fl(FORECAST_MARGIN_LABEL,pct(current.margin),delta(current,previous,"margin","pp")).title=FORECAST_MARGIN_DESC;
     fl("Ожидаемые выкупы",current.quantity==null?"—":current.quantity.toLocaleString("ru-RU",{maximumFractionDigits:1})+" шт");
-    fl(ROI_LABEL,pct(current.roi)).title=FORECAST_ROI_DESC;
+    fl(FORECAST_ROI_LABEL,pct(current.roi)).title=FORECAST_ROI_DESC;
     fl("Прогнозная выручка",fmt(t.frev)+" ₽",delta(t,pt,"frev"));
     fl("Себестоимость выкупов",current.cost==null?"—":fmt(current.cost)+" ₽");
-    fl(REVENUE_COST_LABEL,pct(current.revenueCost)).title=REVENUE_COST_DESC;
+
     fl("Реклама",fmt(Math.abs(t.ads))+" ₽ · ДРР "+pct(t.frev>0?Math.abs(t.ads)/t.frev:null));
     const go=el("button","pill","Открыть отчёт");go.style.alignSelf="flex-start";go.addEventListener("click",()=>setEnt(e));c.append(go);b.append(c)});
   w.append(b,forecasts,trendChart());return w;
@@ -592,19 +591,19 @@ function salesView(range){
   w.append(p);
   // table
   const tp=el("section","panel");tp.append(el("h2",null,"По дням"));const wrap=el("div","tablewrap");const t=el("table","days");wrap.append(t);tp.append(wrap);
-  const hr=el("tr");["День","Заказано, шт","Выручка ИП","Выручка Феникс","Выручка всего","Реклама","Прибыль","Маржа",ROI_LABEL,"Прибыль 80%",FORECAST_MARGIN_LABEL,REVENUE_COST_LABEL].forEach(x=>hr.append(el("th",null,x)));const thd=el("thead");thd.append(hr);t.append(thd);
+  const hr=el("tr");["День","Заказано, шт","Выручка ИП","Выручка Феникс","Выручка всего","Реклама","Прибыль","Маржа",ROI_LABEL,"Прибыль 80%",FORECAST_MARGIN_LABEL,FORECAST_ROI_LABEL].forEach(x=>hr.append(el("th",null,x)));const thd=el("thead");thd.append(hr);t.append(thd);
   const tb=el("tbody");t.append(tb);const S={q:0,rw:0,rf:0,ads:0,pr:0,fp:0};
   const costHeader=t.tHead.rows[0].lastElementChild;
-  costHeader.title=REVENUE_COST_DESC;
+  costHeader.title=FORECAST_ROI_DESC;
   costHeader.previousElementSibling.title=FORECAST_MARGIN_DESC;
   const roiCell=totals=>{const td=el("td");td.append(roiText(totals));return td};
   ds.slice().reverse().forEach(d=>{const r=st.reports[d];const T=combine(r.WH&&r.WH.totals,r.FX&&r.FX.totals);const rw=r.WH?r.WH.totals.rev:0,rf=r.FX?r.FX.totals.rev:0;
     const reports=reportsForMetrics(d,"ALL");
     S.q+=T.q;S.rw+=rw;S.rf+=rf;S.ads+=T.ads;S.pr+=T.profit;S.fp+=T.fprofit;
     const tr=el("tr","model");tr.addEventListener("click",()=>{st.date=d;setEnt("ALL")});
-    tr.append(el("td",null,fromIso(d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"})),el("td",null,fmt(T.q)),el("td",null,fmt(rw)),el("td",null,fmt(rf)),el("td",null,fmt(rw+rf)),el("td",null,fmt(Math.abs(T.ads))),el("td",T.profit<0?"neg":null,fmt(T.profit)));const m=el("td");m.append(mchip(T.m));tr.append(m,roiCell(dayRoi(d)),el("td",null,fmt(T.fprofit)),el("td",null,pct(forecastMargin(reports))),el("td",null,pct(revenueOnCost(reports))));tb.append(tr)});
+    tr.append(el("td",null,fromIso(d).toLocaleDateString("ru-RU",{weekday:"short",day:"numeric",month:"short"})),el("td",null,fmt(T.q)),el("td",null,fmt(rw)),el("td",null,fmt(rf)),el("td",null,fmt(rw+rf)),el("td",null,fmt(Math.abs(T.ads))),el("td",T.profit<0?"neg":null,fmt(T.profit)));const m=el("td");m.append(mchip(T.m));tr.append(m,roiCell(dayRoi(d)),el("td",null,fmt(T.fprofit)),el("td",null,pct(forecastMargin(reports))),el("td",null,pct(reportsForecastRoi(reports))));tb.append(tr)});
   const allReports=ds.flatMap(d=>reportsForMetrics(d,"ALL"));
-  const tr=el("tr","total");const rr=S.rw+S.rf;tr.append(el("td",null,"ИТОГО"),el("td",null,fmt(S.q)),el("td",null,fmt(S.rw)),el("td",null,fmt(S.rf)),el("td",null,fmt(rr)),el("td",null,fmt(Math.abs(S.ads))),el("td",null,fmt(S.pr)));const m=el("td");m.append(mchip(rr?S.pr/rr:null));tr.append(m,roiCell(periodTotals),el("td",null,fmt(S.fp)),el("td",null,pct(forecastMargin(allReports))),el("td",null,pct(revenueOnCost(allReports))));tb.append(tr);
+  const tr=el("tr","total");const rr=S.rw+S.rf;tr.append(el("td",null,"ИТОГО"),el("td",null,fmt(S.q)),el("td",null,fmt(S.rw)),el("td",null,fmt(S.rf)),el("td",null,fmt(rr)),el("td",null,fmt(Math.abs(S.ads))),el("td",null,fmt(S.pr)));const m=el("td");m.append(mchip(rr?S.pr/rr:null));tr.append(m,roiCell(periodTotals),el("td",null,fmt(S.fp)),el("td",null,pct(forecastMargin(allReports))),el("td",null,pct(reportsForecastRoi(allReports))));tb.append(tr);
   w.append(tp);
   return w;
 }
